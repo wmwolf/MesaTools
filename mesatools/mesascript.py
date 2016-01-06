@@ -9,7 +9,7 @@ class NamelistItem(object):
         self.name = name
         self.lower_name = string.lower(name)
         self.dtype = dtype
-        self.shape = dim
+        self.dim = dim
         self.order = order
         self.namelist = namelist
         self.doc = doc
@@ -60,7 +60,7 @@ def full_line(lines, i):
 def full_doc_line(lines, i):
     if re.match("\A\s*!###", lines[i]):
         good_lines = [lines[i]]
-        for line in lines[i+1]:
+        for line in lines[i+1:]:
             if re.match('\A\s*!', line) or re.match('\A\s+\Z', line):
                 good_lines.append(line)
             else:
@@ -68,6 +68,9 @@ def full_doc_line(lines, i):
         return ''.join(good_lines)
     else:
         return None
+
+def dtype_and_value(val_string):
+
 
 def generate_language_file(mesa_dir=None, save_file=None):
     """Make JSON file that characterizes all valid inlist commands.
@@ -231,6 +234,8 @@ def generate_language_file(mesa_dir=None, save_file=None):
                                                                 num_indices, -1,
                                                                 namelist, ''))
         for default_file in default_files[namelist]:
+            # Read in lines from default files. If that fails, fail gracefully
+            # and try opening the next one.
             try:
                 with open(default_file, 'r') as f:
                     lines = f.readlines()
@@ -238,11 +243,75 @@ def generate_language_file(mesa_dir=None, save_file=None):
                 print "Couldn't open file {}.".format(default_file)
                 next
 
+            # Get all names for items in this namelist
+            names = [item.name for item in namelist_data[namelist]]
+
+            # Go through each line of the defaults file, looking for lines that
+            # give markdown formatted documentation for a control. Then
+            # extract name and documentation from comments, order, dtype and
+            # default from its position and value in the file.
+            order = 0
             for i, line in enumerate(lines):
                 doc = full_doc_line(lines, i)
                 if doc:
                     name = re.search('!###\s*(.*)\n', doc).groups()[0].strip()
-                
+                    if name not in names:
+                        print('Found item "{}" in defaults'.format(name) +
+                              'file for namelist {}, but'.format(namelist) +
+                              "didnt find it in definition file.")
+                        next
+                    # position in namelist_data[namelist] for item
+                    j = names.index(name)
+                    for k in range(i, len(lines)):
+                        # find first line that ISN'T a comment or blank line
+                        if re.match('!', lines[k]) or re.match('\A\s+\Z',
+                                                               lines[k]):
+                            next
+                        else:
+                            # split definition line around equals sign
+                            def_line = lines[k].split('=')
+                            # check if name of variable matches one in doc
+                            assign_name = def_line[0].strip()
+                            if assign_name.lower() != name.lower():
+                                print("Warning: " + assign_name + " does not "+
+                                      "match " + name + " in documentation.")
+                            # get default value in string form
+                            val_string = def_line[1].strip()
+
+                            # determine dtype and default from value string
+                            # MAKE THIS IT'S OWN FUNCTION
+                            if val_string.lower() in ['.true.', '.false.']:
+                                dtype = bool
+                                if val_string.lower() == '.true.':
+                                    val = True
+                                else:
+                                    val = False
+                            elif "'" in val_string.lower():
+                                dtype = str
+                                val = val_string
+                            elif 'd' in val_string.lower():
+                                dtype = float
+                                val = val_string.lower().replace('d', 'e')
+                            elif re.match('\A\d+\Z', val_string.lower()):
+                                dtype = int
+                                val = val_string
+                            else:
+                                print("Couldn't determine dtype of " +
+                                      val_string +'. Keeping it as a string ' +
+                                      'literal.')
+                                dtype = str
+                                val = val_string
+                            val = dtype(val)
+                            break
+
+
+                    namelist_data[namelist][j].dtype = dtype
+                    namelist_data[namelist][j].doc = doc
+
+
+
+
+
 
 
 
