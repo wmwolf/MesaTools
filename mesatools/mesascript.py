@@ -1,8 +1,9 @@
 import json
 from os.path import join
 import os
-import string
 import re
+
+import yaml
 
 # Each item has an associated converter function that will take inputs
 # and cast them to the appropriate data types.
@@ -73,13 +74,21 @@ class NamelistItem(object):
     """
     def __init__(self, name, dtype, default, dim, order, namelist, doc):
         self.name = name
-        self.lower_name = string.lower(name)
+        self.lower_name = name.lower()
         self.dtype = dtype
         self.default = default
         self.dim = dim
         self.order = order
         self.namelist = namelist
         self.doc = doc
+
+    def __repr__(self):
+        return yaml.dump(self.__dict__)
+
+    def to_dict(self):
+        return {'name': self.name, 'lower_name': self.lower_name, 'dtype':
+            self.dtype, 'default': self.default, 'dim': self.dim, 'order':
+            self.order, 'namelist': self.namelist, 'doc': self.doc}
 
 class BadPathError(Exception):
     def __init__(self, msg):
@@ -138,22 +147,6 @@ def full_line(lines, i):
         return lines[i]
     else:
         return ' '.join([lines[i].replace('&', ''), full_line(lines, i+1)])
-
-# TODO: Finish this up since multiple headers can share comment text
-def full_doc_line(lines, i):
-    if re.match("\A\s*!###", lines[i]):
-        good_lines = [lines[i]]
-        for line in lines[i+1:]:
-            # include comments and blank lines only
-            if re.match('\A\s*!', line) or re.match('\A\s+\Z', line):
-                # but exclude other headers
-                if re.match('\A\s*![^#]'):
-                    good_lines.append(line)
-            else:
-                break
-        return ''.join(good_lines)
-    else:
-        return None
 
 def dtype_and_value(val_string):
     '''Determine data type and appropriate value of value in string form.
@@ -215,6 +208,37 @@ def get_mesa_dir(mesa_dir=None):
             return os.environ['MESA_DIR']
     return mesa_dir
 
+def get_doc_text(defaults_lines, name):
+    """Get full doc text for an inlist item."""
+    def is_doc(line):
+        blank_matcher = re.compile('\s*\Z')
+        text_matcher = re.compile('\s*!\s*[^#]\w+')
+        return ((blank_matcher.match(line) or text_matcher.match(line)) is not
+                                               None)
+    def is_code(line):
+        code_matcher = re.compile('\s*\w+')
+        return code_matcher.match(line) is not None
+
+    header_matcher = re.compile('\A\s*!\s*###\s*{}(\(.*\))?\s*\Z'.format(name))
+    res = ''
+    # print("Getting documentation for {}".format(name))
+    found_header = False
+    for i, line in enumerate(defaults_lines):
+        if header_matcher.match(line) is not None:
+            res += (line.strip() + "\n")
+            found_header = True
+        elif found_header:
+            if is_code(line):
+                # print("CODE LINE: {}".format(line))
+                # print("reached end!")
+                # print(res.strip())
+                return res.strip()
+            elif is_doc(line):
+                res += ('  ' + line.strip() + '\n')
+    # print("Never found the end.\n")
+    return "Could not get documentation for item {}.".format(name)
+
+
 
 def generate_language_file(mesa_dir=None, save_file=None):
     """Make JSON file that characterizes all valid inlist commands.
@@ -261,22 +285,29 @@ def generate_language_file(mesa_dir=None, save_file=None):
         'controls': [join(mesa_dir, 'star', 'private', 'star_controls.inc'),],
         'pgstar': [join(mesa_dir, 'star', 'private', 'pgstar_controls.inc')]
     }
-    define_files['pgstar'].append(join(mesa_dir, 'star', 'private',
+    define_files['controls'].append(join(mesa_dir, 'star', 'private',
                                     'ctrls_io.{}'.format(f_end(version))))
     default_files = {namelist: join(mesa_dir, 'star', 'defaults', namelist +
                                     '.defaults') for namelist in namelists}
+
+    # Useful regular expressions used elsewhere downscope
+    dimension_match = re.compile('dimension\((.*)\)', re.IGNORECASE)
+    paren_matcher = re.compile('\(.*\)')
+
     # Go through each namelist, pulling information with associated
     # definition and default files and buliding a dict of arrays of inlist
     # items.
     namelist_data = {}
+    namelist_dicts = {}
     for namelist in namelists:
+        print("Gathering inlist items for namelist {}...".format(namelist))
         namelist_data[namelist] = []
         for define_file in define_files[namelist]:
             try:
                 with open(define_file, 'r') as f:
                     lines = f.readlines()
             except IOError as e:
-                print "Couldn't open file {}.".format(define_file)
+                print("Couldn't open file {}.".format(define_file))
                 continue
 
             # Clean out lines that are entirely comments or blank
@@ -337,7 +368,6 @@ def generate_language_file(mesa_dir=None, save_file=None):
                         paren_level -= 1
                     new_names.append(char)
                 new_names = (''.join(new_names).split(','))
-                dimension_match = re.compile('dimension\((.*)\)', re.IGNORECASE)
                 for name in new_names:
                     if re.match('\(.*\)', name):
                         num_indices = name.count('!') + 1
@@ -347,11 +377,14 @@ def generate_language_file(mesa_dir=None, save_file=None):
                         num_indices = dim_match.groups()[0].count(',') + 1
                     else:
                         num_indices = 0
+                    name = paren_matcher.sub('', name)
+                    # print("Adding inlist item {}".format(name.strip()))
 
                     # Add new record for namelist item, which will later be
                     # checked for more proper defaults, order,
                     # and documentation.
-                    namelist_data[namelist].append(NamelistItem(name, dtype,
+                    namelist_data[namelist].append(NamelistItem(name.strip(),
+                                                                dtype,
                                                                 dft,
                                                                 num_indices, -1,
                                                                 namelist, ''))
@@ -362,67 +395,75 @@ def generate_language_file(mesa_dir=None, save_file=None):
             with open(default_file, 'r') as f:
                 lines = f.readlines()
         except IOError as e:
-            print "Couldn't open file {}.".format(default_file)
+            print("Couldn't open file {}.".format(default_file))
             continue
 
         # Get all names for items in this namelist
         names = [item.name for item in namelist_data[namelist]]
+        lower_names = [name.lower() for name in names]
+
+        # print(lower_names)
 
         # Go through each line of the defaults file, looking for lines that
-        # give markdown formatted documentation for a control. Then
-        # extract name and documentation from comments, order, dtype and
+        # define the default for a control. Then name, order, dtype and
         # default from its position and value in the file.
         order = 0
         for i, line in enumerate(lines):
-            doc = full_doc_line(lines, i)
-            if doc:
-                # TODO: Update this to allow for multiple headers to share
-                # doc lines
-                name = re.search('!###\s*(.*)\n', doc).groups()[0].strip()
-                if name not in names:
-                    # print('Found item "{}" in defaults '.format(name) +
-                    #       'file for namelist {}, but '.format(namelist) +
-                    #       "didn't find it in definition file.")
-                    continue
-                # position in namelist_data[namelist] for item
-                j = names.index(name)
-                for k in range(i, len(lines)):
-                    # find first line that ISN'T a comment or blank line
-                    if re.match('\A\s*\!', lines[k]) or re.match('\A\s+\Z',
-                                                           lines[k]):
-                        # print("Skipping line " + lines[k])
-                        continue
-                    else:
-                        # split definition line around equals sign
-                        # print("Processing line " + lines[k])
-                        def_line = lines[k].split('=')
-                        # check if name of variable matches one in doc
-                        assign_name = def_line[0].strip()
-                        if assign_name.lower() != name.lower():
-                            print("Warning: " + assign_name + " does not "+
-                                  "match " + name + " in documentation.")
-                        # get default value in string form
-                        val_string = def_line[1].strip()
-                        if '!' in val_string:
-                            val_string = val_string[:val_string.index(
-                                '!')].strip()
-                        dtype, val = dtype_and_value(val_string)
-                        break
+            # only look at lines that AREN'T comments or blank lines
+            if re.match('\A\s*\!', lines[i]) or re.match('\A\s+\Z',
+                                                         lines[i]):
+                continue
+            else:
+                # split definition line around equals sign
+                # print("Processing line " + lines[k])
+                def_line = lines[i].split('=')
+                # get name and see if it has any indices
+                assign_name = def_line[0]
+                if paren_matcher.match(assign_name):
+                    num_indices = assign_name.count(',')
+                else:
+                    num_indices = 0
+                assign_name = paren_matcher.sub('', assign_name).strip()
+                # get default value in string form
+                val_string = def_line[1].strip()
+                if '!' in val_string:
+                    val_string = val_string[:val_string.index(
+                        '!')].strip()
+                dtype, val = dtype_and_value(val_string)
+                doc = get_doc_text(lines, assign_name)
 
-
-                namelist_data[namelist][j].dtype = dtype
-                namelist_data[namelist][j].default = val
-                namelist_data[namelist][j].order = order
-                namelist_data[namelist][j].doc = doc
-
+                # find inlist item and update metadata
+                try:
+                    j = lower_names.index(assign_name.lower())
+                    # namelist_data[namelist][j].dtype = dtype
+                    namelist_data[namelist][j].default = val
+                    namelist_data[namelist][j].order = order
+                    namelist_data[namelist][j].doc = doc
+                except ValueError as e:
+                    namelist_data[namelist].append(NamelistItem(assign_name,
+                                                                dtype, val,
+                                                                num_indices,
+                                                                order,
+                                                                namelist, doc))
                 order += 1
-    print(json.dumps(namelist_data))
+            namelist_dicts[namelist] = [item.to_dict() for item in
+                                        namelist_data[namelist]]
 
+    with open(save_file, 'w') as f:
+        print(yaml.dump(namelist_dicts, f, default_flow_style=False))
+
+def make_database():
+    generate_language_file(mesa_dir=os.environ['MESA_DIR'],
+                           save_file=join(os.environ['MESA_DIR'], 'data',
+                                          'inlist_commands.yml'))
+
+def have_database():
+    return 'inlist_commands.yml' in os.listdir(join(environ['MESA_DIR'],
+                                                    'data'))
 
 if __name__ == '__main__':
-    generate_language_file(mesa_dir=os.environ['MESA_DIR'],
-                           save_file='/Users/wmwolf/Desktop/test.json')
-
+    if not have_database():
+        make_database()
 
 
 
