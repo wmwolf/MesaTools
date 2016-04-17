@@ -1,9 +1,8 @@
-import json
 from os.path import join
 import os
 import re
 
-import yaml
+import sqlite3
 
 # Each item has an associated converter function that will take inputs
 # and cast them to the appropriate data types.
@@ -82,13 +81,33 @@ class NamelistItem(object):
         self.namelist = namelist
         self.doc = doc
 
-    def __repr__(self):
-        return yaml.dump(self.__dict__)
+    @classmethod
+    def from_tuple(cls, tup):
+        '''Make new InlistItem from tuple produced by `to_tuple`'''
+        name = tup[0]
+        dtype = tup[2]
+        default = tup[3]
+        dim = tup[4]
+        order = tup[5]
+        namelist = tup[6]
+        doc = tup[7]
+        if dtype == 'bool':
+            if default == "False":
+                default = False
+            else:
+                default = True
+        else:
+            default = dtype_funcs[dtype](default)
+        return cls(name, dtype, default, dim, order, namelist, doc)
 
     def to_dict(self):
         return {'name': self.name, 'lower_name': self.lower_name, 'dtype':
             self.dtype, 'default': self.default, 'dim': self.dim, 'order':
             self.order, 'namelist': self.namelist, 'doc': self.doc}
+
+    def to_tuple(self):
+        return (self.name, self.lower_name, self.dtype, str(self.default),
+                self.dim, self.order, self.namelist, self.doc)
 
 class BadPathError(Exception):
     def __init__(self, msg):
@@ -240,18 +259,14 @@ def get_doc_text(defaults_lines, name):
 
 
 
-def generate_language_file(mesa_dir=None, save_file=None):
-    """Make JSON file that characterizes all valid inlist commands.
+def generate_language_data(mesa_dir=None, save_file=None):
+    """Make list of InlistItems that characterizes all valid inlist commands.
 
     Parameters
     ----------
     mesa_dir : str, optional
         path to mesa installation from which to generate language, default is
         taken from environment variable MESA_DIR
-    save_loc : str, optional
-        path to JSON file that should hold language information, default is
-        `$MESA_DIR/data/mesascript_lang_XXXX.json` where the XXXX is the
-        version number
     """
 
     # Confirm/find mesa directory
@@ -297,11 +312,9 @@ def generate_language_file(mesa_dir=None, save_file=None):
     # Go through each namelist, pulling information with associated
     # definition and default files and buliding a dict of arrays of inlist
     # items.
-    namelist_data = {}
-    namelist_dicts = {}
+    namelist_data = []
     for namelist in namelists:
         print("Gathering inlist items for namelist {}...".format(namelist))
-        namelist_data[namelist] = []
         for define_file in define_files[namelist]:
             try:
                 with open(define_file, 'r') as f:
@@ -383,11 +396,9 @@ def generate_language_file(mesa_dir=None, save_file=None):
                     # Add new record for namelist item, which will later be
                     # checked for more proper defaults, order,
                     # and documentation.
-                    namelist_data[namelist].append(NamelistItem(name.strip(),
-                                                                dtype,
-                                                                dft,
-                                                                num_indices, -1,
-                                                                namelist, ''))
+                    namelist_data.append(NamelistItem(name.strip(),
+                                                      dtype, dft, num_indices,
+                                                      -1, namelist, ''))
         default_file = default_files[namelist]
         # Read in lines from default files. If that fails, fail gracefully
         # and try opening the next one.
@@ -399,7 +410,7 @@ def generate_language_file(mesa_dir=None, save_file=None):
             continue
 
         # Get all names for items in this namelist
-        names = [item.name for item in namelist_data[namelist]]
+        names = [item.name for item in namelist_data]
         lower_names = [name.lower() for name in names]
 
         # print(lower_names)
@@ -435,39 +446,55 @@ def generate_language_file(mesa_dir=None, save_file=None):
                 # find inlist item and update metadata
                 try:
                     j = lower_names.index(assign_name.lower())
-                    # namelist_data[namelist][j].dtype = dtype
-                    namelist_data[namelist][j].default = val
-                    namelist_data[namelist][j].order = order
-                    namelist_data[namelist][j].doc = doc
+                    namelist_data[j].default = val
+                    namelist_data[j].order = order
+                    namelist_data[j].doc = doc
                 except ValueError as e:
-                    namelist_data[namelist].append(NamelistItem(assign_name,
+                    namelist_data.append(NamelistItem(assign_name,
                                                                 dtype, val,
                                                                 num_indices,
                                                                 order,
                                                                 namelist, doc))
                 order += 1
-            namelist_dicts[namelist] = [item.to_dict() for item in
-                                        namelist_data[namelist]]
+        # namelist_dicts = [item.to_dict() for item in namelist_data]
+        namelist_tuples = [item.to_tuple() for item in namelist_data]
+    return namelist_tuples
 
-    with open(save_file, 'w') as f:
-        print(yaml.dump(namelist_dicts, f, default_flow_style=False))
+def make_database(save_file=None):
+    '''Make database of inlist commands.
 
-def make_database():
-    generate_language_file(mesa_dir=os.environ['MESA_DIR'],
-                           save_file=join(os.environ['MESA_DIR'], 'data',
-                                          'inlist_commands.yml'))
+    Parameters
+    ----------
+    save_file : str, optional
+        path to database file that should hold language information, default is
+        `$MESA_DIR/data/inlist_commands.db`
+
+    Returns
+    -------
+    None
+    '''
+    if save_file is None:
+        save_file = join(os.environ['MESA_DIR'], 'data', 'inlist_commands.db')
+    data = generate_language_data(mesa_dir=os.environ['MESA_DIR'])
+    print(data)
+
+    # Make SQlite3 table
+    conn = sqlite3.connect(save_file)
+    c = conn.cursor()
+    c.execute("CREATE TABLE inlist_items\n" + "(name text, lower_name text, "
+              "dtype text, dft text, dim integer, ord integer, namelist text," +
+              "doc text)")
+    conn.commit()
+
+    # Add data
+    c.executemany('INSERT INTO inlist_items VALUES (?,?,?,?,?,?,?,?)', data)
+    conn.commit()
 
 def have_database():
-    return 'inlist_commands.yml' in os.listdir(join(environ['MESA_DIR'],
+    return 'inlist_commands.db' in os.listdir(join(os.environ['MESA_DIR'],
                                                     'data'))
 
 if __name__ == '__main__':
     if not have_database():
-        make_database()
-
-
-
-
-
-
-
+        pass
+    make_database()
