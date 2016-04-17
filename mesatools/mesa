@@ -5,7 +5,17 @@ from sys import argv
 
 cli = CLI_Instance()
 
-if argv[1] == 'doc':
+command = argv[1]
+
+if command == 'doc':
     print(cli.doc(argv[2]))
-elif argv[1] == 'default':
+elif command == 'default':
     print(cli.default(argv[2]))
+elif command == 'version':
+    print(cli.version())
+elif command == 'summary':
+    print(cli.summary(argv[2]))
+elif command == 'search':
+    print(cli.search_name(*argv[2:]))
+elif command == 'searchd':
+    print(cli.search_doc(*argv[2:]))

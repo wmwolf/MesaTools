@@ -12,17 +12,6 @@ class NoDatabaseError(Exception):
     def __init__(self, msg):
         Exception.__init__(self, msg)
 
-INLIST_INDICES={
-    'name': 0,
-    'lower_name': 1,
-    'dtype': 2,
-    'default': 3,
-    'dim': 4,
-    'order': 5,
-    'namelist': 6,
-    'doc': 7
-}
-
 class CLI_Instance(object):
     def __init__(self):
         self._data = None
@@ -36,24 +25,71 @@ class CLI_Instance(object):
         return sqlite3.connect(join(data_path, 'inlist_commands.db')).cursor()
 
     def find_item(self, name):
-        select_by = (name,)
+        select_by = (name.lower(),)
         self.data.execute('SELECT * FROM inlist_items WHERE lower_name=?',
                           select_by)
         return NamelistItem.from_tuple(self.data.fetchone())
-        # for namelist in self.data:
-        #     try:
-        #         i = self.names[namelist].index(name.lower())
-        #         return self.data[namelist][i]
-        #     except ValueError as e:
-        #         pass
-        # raise ItemNotFoundError('No such inlist item {} in any known ' +
-        #     'namelist.'.format(name))
+
+    def search_name(self, name, namelist=None):
+        search_pattern = '%{}%'.format(name.lower())
+        if namelist is None:
+            injection = (search_pattern, )
+            self.data.execute('SELECT * FROM inlist_items WHERE lower_name ' +
+                              'LIKE ?', injection)
+        else:
+            injection = (namelist, search_pattern)
+            self.data.execute('SELECT * FROM inlist_items WHERE lower_name ' +
+                              'LIKE ? AND namelist=?', injection)
+        names = [NamelistItem.from_tuple(item).name for item in
+                 self.data.fetchall()]
+        return '\n'.join(names)
+
+    def search_doc(self, term, namelist=None):
+        search_pattern = '%{}%'.format(term)
+        if namelist is None:
+            injection = (search_pattern, )
+            self.data.execute('SELECT * FROM inlist_items WHERE doc ' +
+                              'LIKE ?', injection)
+        else:
+            injection = (namelist, search_pattern)
+            self.data.execute('SELECT * FROM inlist_items WHERE doc ' +
+                              'LIKE ? AND namelist=?', injection)
+        output = []
+        for item in self.data.fetchall():
+            data = NamelistItem.from_tuple(item)
+            output.append("{}\n{}\n".format(data.name, data.doc)+('-'*78))
+        return '\n'.join(output)
 
     def doc(self, name):
         return self.find_item(name).doc
 
     def default(self, name):
         return self.find_item(name).default
+
+    def dtype(self, name):
+        return self.find_item(name).dtype
+
+    def namelist(self, name):
+        return self.find_item(name).namelist
+
+    def summary(self, name):
+        item = self.find_item(name)
+        res = ("name:     {}\n".format(item.name) +
+               "dtype:    {}\n".format(item.dtype) +
+               "default:  {}\n".format(item.default) +
+               "namelist: {}\n".format(item.namelist) +
+               "doc:      \n\n{}".format(item.doc))
+        return res
+
+    def mesa_dir(self):
+        return os.environ['MESA_DIR']
+
+    def version(self):
+        with open(join(self.mesa_dir(), 'data', 'version_number'), 'r') as f:
+            ver_num = f.read().strip()
+        return int(ver_num)
+
+
 
     @property
     def data(self):
