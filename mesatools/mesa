@@ -19,3 +19,5 @@ elif command == 'search':
     print(cli.search_name(*argv[2:]))
 elif command == 'searchd':
     print(cli.search_doc(*argv[2:]))
+else:
+    print("Not a valid command: {}.".format(command))
