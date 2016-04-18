@@ -19,5 +19,13 @@ elif command == 'search':
     print(cli.search_name(*argv[2:]))
 elif command == 'searchd':
     print(cli.search_doc(*argv[2:]))
+elif command == 'makedb':
+    print("Making database...")
+    if len(argv) > 2:
+        cli.makedb(argv[2])
+    else:
+        cli.makedb()
+    print("All done!")
+
 else:
     print("Not a valid command: {}.".format(command))

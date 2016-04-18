@@ -2,7 +2,7 @@ import os
 from os.path import join
 
 import sqlite3
-from database import NamelistItem
+from database import NamelistItem, make_database
 
 class ItemNotFoundError(Exception):
     def __init__(self, msg):
@@ -89,6 +89,8 @@ class CLI_Instance(object):
             ver_num = f.read().strip()
         return int(ver_num)
 
+    def makedb(self, savefile=None):
+        make_database(savefile)
 
 
     @property
