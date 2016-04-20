@@ -1,6 +1,7 @@
-from os.path import join
+from os.path import join, isfile, splitext
 import os
 import re
+import shutil
 
 import sqlite3
 
@@ -110,6 +111,10 @@ class NamelistItem(object):
                 self.dim, self.order, self.namelist, self.doc)
 
 class BadPathError(Exception):
+    def __init__(self, msg):
+        Exception.__init__(self, msg)
+
+class InvalidDatabaseError(Exception):
     def __init__(self, msg):
         Exception.__init__(self, msg)
 
@@ -467,14 +472,14 @@ def make_database(save_file=None):
     ----------
     save_file : str, optional
         path to database file that should hold language information, default is
-        `$MESA_DIR/data/inlist_commands.db`
+        `$MESA_DIR/data/mesa.db`
 
     Returns
     -------
     None
     '''
     if save_file is None:
-        save_file = join(os.environ['MESA_DIR'], 'data', 'inlist_commands.db')
+        save_file = join(os.environ['MESA_DIR'], 'data', 'mesa.db')
     data = generate_language_data(mesa_dir=os.environ['MESA_DIR'])
     print(data)
 
@@ -491,8 +496,97 @@ def make_database(save_file=None):
     conn.commit()
 
 def have_database():
-    return 'inlist_commands.db' in os.listdir(join(os.environ['MESA_DIR'],
+    return 'mesa.db' in os.listdir(join(os.environ['MESA_DIR'],
                                                     'data'))
+
+class MesaDatabase(object):
+    '''Interface for reading and searching a MESA database.
+
+    Parameters
+    ----------
+    db_file : str, optional
+        path to MESA database file. If none is provided, looks in
+        $MESA_DIR/data/mesa.db
+
+    Attributes
+    ----------
+    db_file : str
+        path to MESA database file
+    cursor : sqlite.Cursor
+        database cursor for reading from database
+
+    '''
+    def __init__(self, db_file=None):
+        if db_file is None:
+            db_file = join(os.environ['MESA_DIR'], 'data', 'mesa.db')
+        self._db_file = db_file
+        self._cursor = None
+
+    def create(self):
+        """Backs up old database if it is present and makes new database."""
+        if self._does_db_file_exist():
+            name, ext = splitext(self.db_file)
+            old_db_file = ''.join((name + '_old', ext))
+            shutil.move(self.db_file, old_db_file)
+        make_database(self.db_file)
+
+    def search(self, table, query, terms):
+        '''Generic search on the database cursor.
+
+        Modifies the state of `self.cursor` so that search results can be
+        read off
+
+        Parameters
+        ----------
+        table : str
+            name of the table in the database to be queried
+        query : str
+            SQL query with number of ?'s matching the length of `terms`
+        terms : tuple of str
+            terms to be sanitized and injected in to `query`. Must be same
+            length as the number of ?'s in `query`.
+
+        Returns
+        -------
+        None
+        '''
+        self._ensure_connection()
+        assert query.count('?') == len(terms), ("Search query must have equal "+
+                                                "number of question marks as " +
+                                                "the length of search terms.")
+        self.cursor.execute("SELECT * FROM {} WHERE {}".format(table, query),
+                            terms)
+
+    def _ensure_connection(self):
+        '''Connects to database if not already done.'''
+        if self.cursor is None:
+            self._connect()
+
+    def _connect(self):
+        '''Establish connection to database and make cursor.'''
+        if self._does_db_file_exist():
+            conn = sqlite3.connect(self.db_file)
+            self.cursor = conn.cursor()
+        else:
+            raise InvalidDatabaseError('No such database found: {}'.format(
+                self.db_file))
+
+
+    def _does_db_file_exist(self):
+        '''Determines if database file exists or not.'''
+        return isfile(self.db_file)
+
+    @property
+    def db_file(self):
+        return self._db_file
+
+    @property
+    def cursor(self):
+        return self._cursor
+
+    @cursor.setter
+    def cursor(self, value):
+        self._cursor = value
 
 if __name__ == '__main__':
     if not have_database():
