@@ -9,9 +9,9 @@ setup(name='mesatools',
     packages=['mesatools'],
     entry_points={
         'console_scripts': [
-            ('mesa = mesatools.cli:mesa')
+            ('py_mesa = mesatools.cli:mesa')
         ]
     },
-    install_requires=['numpy', 'sqlite3'],
+    install_requires=['numpy'],
     include_package_data=False,
     zip_safe=False)

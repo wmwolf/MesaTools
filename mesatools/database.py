@@ -2,8 +2,10 @@ from os.path import join, isfile, splitext
 import os
 import re
 import shutil
-
 import sqlite3
+
+from .helpers import get_mesa_dir
+
 
 # Each item has an associated converter function that will take inputs
 # and cast them to the appropriate data types.
@@ -222,15 +224,6 @@ def dtype_and_value(val_string):
 
 
 
-def get_mesa_dir(mesa_dir=None):
-    # Try to find default mesa dir location if one isn't provided
-    if mesa_dir is None:
-        if 'MESA_DIR' not in os.environ:
-            raise BadPathError('Could not find an environment variable ' +
-                               'called MESA_DIR.')
-        else:
-            return os.environ['MESA_DIR']
-    return mesa_dir
 
 def get_doc_text(defaults_lines, name):
     """Get full doc text for an inlist item."""
@@ -465,7 +458,7 @@ def generate_language_data(mesa_dir=None, save_file=None):
         namelist_tuples = [item.to_tuple() for item in namelist_data]
     return namelist_tuples
 
-def make_database(save_file=None):
+def make_database(save_file=join(get_mesa_dir(), 'data', 'mesa.db')):
     '''Make database of inlist commands.
 
     Parameters
@@ -478,9 +471,7 @@ def make_database(save_file=None):
     -------
     None
     '''
-    if save_file is None:
-        save_file = join(os.environ['MESA_DIR'], 'data', 'mesa.db')
-    data = generate_language_data(mesa_dir=os.environ['MESA_DIR'])
+    data = generate_language_data(mesa_dir=get_mesa_dir())
     print(data)
 
     # Make SQlite3 table
@@ -496,8 +487,7 @@ def make_database(save_file=None):
     conn.commit()
 
 def have_database():
-    return 'mesa.db' in os.listdir(join(os.environ['MESA_DIR'],
-                                                    'data'))
+    return 'mesa.db' in os.listdir(join(get_mesa_dir(), 'data'))
 
 class MesaDatabase(object):
     '''Interface for reading and searching a MESA database.
@@ -518,7 +508,7 @@ class MesaDatabase(object):
     '''
     def __init__(self, db_file=None):
         if db_file is None:
-            db_file = join(os.environ['MESA_DIR'], 'data', 'mesa.db')
+            db_file = join(get_mesa_dir(), 'data', 'mesa.db')
         self._db_file = db_file
         self._cursor = None
 
@@ -557,6 +547,47 @@ class MesaDatabase(object):
         self.cursor.execute("SELECT * FROM {} WHERE {}".format(table, query),
                             terms)
 
+    def search_for_one(self, table, query, terms):
+        """Perform search AND return first result.
+        Parameters
+        ----------
+        table : str
+            name of the table in the database to be queried
+        query : str
+            SQL query with number of ?'s matching the length of `terms`
+        terms : tuple of str
+            terms to be sanitized and injected in to `query`. Must be same
+            length as the number of ?'s in `query`.
+
+        Returns
+        -------
+        tuple :
+            Tuple of length one with first database search result
+        """
+        self.search(table, query, terms)
+        return self.cursor.fetchone()
+
+    def search_for_many(self, table, query, terms):
+        """Perform search AND return results.
+        Parameters
+        ----------
+        table : str
+            name of the table in the database to be queried
+        query : str
+            SQL query with number of ?'s matching the length of `terms`
+        terms : tuple of str
+            terms to be sanitized and injected in to `query`. Must be same
+            length as the number of ?'s in `query`.
+
+        Returns
+        -------
+        tuple :
+            Tuple of all database search results
+        """
+        self.search(table, query, terms)
+        return self.cursor.fetchall()
+
+
     def _ensure_connection(self):
         '''Connects to database if not already done.'''
         if self.cursor is None:
@@ -587,8 +618,190 @@ class MesaDatabase(object):
     @cursor.setter
     def cursor(self, value):
         self._cursor = value
+class InlistDbHandler(object):
+    """Interface to get data from inlist commands section of a mesa database.
 
-if __name__ == '__main__':
-    if not have_database():
-        pass
-    make_database()
+    Parameters
+    ----------
+    mesa_db : mesatools.MesaDatabase
+        Database that contains table 'inlist_items'
+
+    Attributes
+    ----------
+    db : mesatools.MesaDatabase
+        the database object that is queried"""
+
+    def __init__(self, mesa_db):
+        self._db = mesa_db
+        self._data = None
+
+    def find_namelist_item(self, name):
+        """Search through inlist_items for namelist object and return one
+
+        Parameters
+        ----------
+        name : str
+            name of the namelist item to be searched for; case insensitive
+
+        Returns
+        -------
+        mesatools.database.NamelistItem
+            Container for data about the desired NameList Item
+
+        Notes
+        -----
+        Unclear what this returns if namelist item is not found.
+        """
+        injection = (name.lower(),)
+        return NamelistItem.from_tuple(
+            self.db.search_for_one('inlist_items', 'lower_name=?', injection))
+
+    def search_namelist_name(self, name, namelist=None):
+        """Searches for namelist items whose names contain a certain string.
+
+        Parameters
+        ----------
+        name : str
+            name or part of name to be searched for
+        namelist : str, optional
+            name of a namelist to restrict search to (ex. star_job, controls, or
+            pgstar. Defaults to None, which means search all namelists
+
+        Returns
+        -------
+        list of mesatools.database.NamelistItem
+            all namelist items that have `name` somewhere in their name and
+            belong to `namelist`, if provided
+        """
+        search_pattern = '%{}%'.format(name.lower())
+        if namelist is None:
+            injection = (search_pattern,)
+            query = 'lower_name LIKE ?'
+        else:
+            injection = (namelist, search_pattern)
+            query = 'lower_name LIKE ? AND namelist=?'
+        return [NamelistItem.from_tuple(item) for item in
+                self.db.search_for_many('inlist_items', query, injection)]
+
+    def search_doc(self, term, namelist=None):
+        """Searches for namelist items by terms in their documentation.
+
+        Parameters
+        ----------
+        term : str
+            term for which to look in documentation for
+        namelist : str, optional
+            name of a namelist to restrict search to (ex. star_job, controls, or
+            pgstar. Defaults to None, which means search all namelists
+
+        Returns
+        -------
+        list of mesatools.database.NamelistItem
+            all namelist items that have `name` somewhere in their name and
+            belong to `namelist`, if provided
+        """
+        search_pattern = '%{}%'.format(term)
+        if namelist is None:
+            injection = (search_pattern,)
+            query = 'doc LIKE ?'
+        else:
+            injection = (namelist, search_pattern)
+            query = 'doc LIKE ? AND namelist=?'
+        return [NamelistItem.from_tuple(item) for item in
+                self.db.search_for_many('inlist_items', query, injection)]
+
+    def doc(self, name):
+        """Find documentation string for a namelist item
+
+        Parameters
+        ----------
+        name : str
+            Name of a valid inlist item
+
+        Returns
+        -------
+        str
+            Documentation for the namelist item"""
+        return self.find_namelist_item(name).doc
+
+    def default(self, name):
+        """Find default value of a namelist item
+
+        Parameters
+        ----------
+        name : str
+            Name of a valid inlist item
+
+        Returns
+        -------
+        TODO: FIGURE THIS OUT. Is a python primitive returned or a string?
+        """
+        return self.find_namelist_item(name).default
+
+    def dtype(self, name):
+        """Find data type (int, float, string, boolean) of a valid inlist item.
+
+        Parameters
+        ----------
+        name : str
+            Name of a valid inlist item
+
+        Returns
+        -------
+        TODO: FIGURE THIS OUT. Is it a python function or a string?
+        """
+        return self.find_namelist_item(name).dtype
+
+    def namelist(self, name):
+        """Find and return the name of the inlist a valid inlist item belongs to
+
+        Parameters
+        ----------
+        name : str
+            Name of a valid inlist item
+
+        Returns
+        -------
+        str :
+            Name of the namelist that `name` belongs to.
+        """
+        return self.find_namelist_item(name).namelist
+
+    def summary(self, name):
+        """Create and return summary string about a valid namelist item
+
+        Parameters
+        ----------
+        name : str
+            Name of a valid inlist item
+
+        Returns
+        -------
+        str:
+            Multiline summary about the namelist item indicated by `name`
+        """
+        item = self.find_namelist_item(name)
+        res = ("name:     {}\n".format(item.name) +
+               "dtype:    {}\n".format(item.dtype) +
+               "default:  {}\n".format(item.default) +
+               "namelist: {}\n".format(item.namelist) +
+               "doc:      \n\n{}".format(item.doc))
+        return res
+
+    @property
+    def db(self):
+        return self._db
+
+    @property
+    def data(self):
+        if self._data is None:
+            self._get_data()
+        return self._data
+
+    @property
+    def names(self):
+        if self._names is None:
+            self._names = {namelist: [item['lower_name'] for item in
+                                      self.data[namelist]]
+                           for namelist in self.data.keys()}
+        return self._names

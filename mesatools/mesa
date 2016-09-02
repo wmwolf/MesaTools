@@ -1,9 +1,9 @@
 #! /usr/bin/env python
-from .cli import CLI_Instance
+from .cli import CLIInstance
 
 from sys import argv
 
-cli = CLI_Instance()
+cli = CLIInstance()
 
 command = argv[1]
 
@@ -16,7 +16,7 @@ elif command == 'version':
 elif command == 'summary':
     print(cli.summary(argv[2]))
 elif command == 'search':
-    print(cli.search_name(*argv[2:]))
+    print(cli.search_namelist_name(*argv[2:]))
 elif command == 'searchd':
     print(cli.search_doc(*argv[2:]))
 elif command == 'makedb':
