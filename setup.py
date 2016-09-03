@@ -12,6 +12,6 @@ setup(name='mesatools',
             ('py_mesa = mesatools.cli:mesa')
         ]
     },
-    install_requires=['numpy'],
+    install_requires=['numpy', 'Click'],
     include_package_data=False,
     zip_safe=False)

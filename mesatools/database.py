@@ -100,7 +100,14 @@ class NamelistItem(object):
             else:
                 default = True
         else:
-            default = dtype_funcs[dtype](default)
+            try:
+                default = dtype_funcs[dtype](default)
+            except KeyError as e:
+                print("Trying to find dtype function for dtype: {}".format(
+                    dtype))
+                print("From tuple: {}".format(tup))
+                print("From tuple type: {}".format(type(tup)))
+                raise e
         return cls(name, dtype, default, dim, order, namelist, doc)
 
     def to_dict(self):
@@ -358,7 +365,7 @@ def generate_language_data(mesa_dir=None, save_file=None):
                 elif 'real' in this_type:
                     dtype=dtypes['real']
                 else:
-                    dtype = None
+                    dtype = dtypes['character']
                 dft = dfts.get(dtype, '')
                 name_chars = list(names)
 
@@ -618,6 +625,7 @@ class MesaDatabase(object):
     @cursor.setter
     def cursor(self, value):
         self._cursor = value
+
 class InlistDbHandler(object):
     """Interface to get data from inlist commands section of a mesa database.
 
