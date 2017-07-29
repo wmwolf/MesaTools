@@ -13,7 +13,7 @@ dtype_funcs = {
     'bool': bool,
     'str': str,
     'int': int,
-    'float' : float,
+    'float': float
 }
 
 # Used to convert between fortran and python type names
@@ -33,6 +33,7 @@ dfts = {
     'int': 0,
     'float': 0.0
 }
+
 
 class NamelistItem(object):
     """Container for MESA namelist item.
@@ -74,6 +75,7 @@ class NamelistItem(object):
     doc : str
         documentation string from defaults file of the object
     """
+
     def __init__(self, name, dtype, default, dim, order, namelist, doc):
         self.name = name
         self.lower_name = name.lower()
@@ -112,20 +114,23 @@ class NamelistItem(object):
 
     def to_dict(self):
         return {'name': self.name, 'lower_name': self.lower_name, 'dtype':
-            self.dtype, 'default': self.default, 'dim': self.dim, 'order':
-            self.order, 'namelist': self.namelist, 'doc': self.doc}
+                self.dtype, 'default': self.default, 'dim': self.dim, 'order':
+                self.order, 'namelist': self.namelist, 'doc': self.doc}
 
     def to_tuple(self):
         return (self.name, self.lower_name, self.dtype, str(self.default),
                 self.dim, self.order, self.namelist, self.doc)
 
+
 class BadPathError(Exception):
     def __init__(self, msg):
         Exception.__init__(self, msg)
 
+
 class InvalidDatabaseError(Exception):
     def __init__(self, msg):
         Exception.__init__(self, msg)
+
 
 def f_end(version):
     """Gives fortran file ending used in MESA depending on the version used
@@ -145,25 +150,29 @@ def f_end(version):
     else:
         return "f"
 
+
 def has_comment(line):
     """Determines if a string contains a fortran comment."""
     return '!' in line
+
 
 def is_comment(line):
     """Determines if a string is entirely a fortran comment."""
     return bool(re.match('\A\s*!', line))
 
+
 def is_blank(line):
     """Determines if a string is entirely white space."""
     return bool(re.match('\A\s+\Z', line))
+
 
 def full_line(lines, i):
     """Gives full line in one string
 
     Takes an array of strings, `lines`, and a starting index, `i` to obtain a
-    full line of fortran code. This done by detecting if the line ends in an "&"
-    and if it does, concatenating it with the next line (removing the &) and
-    repeating the process recursively until a line does not end in an "&".
+    full line of fortran code. This done by detecting if the line ends in an
+    "&" and if it does, concatenating it with the next line (removing the &)
+    and repeating the process recursively until a line does not end in an "&".
 
     Parameters
     ----------
@@ -179,7 +188,8 @@ def full_line(lines, i):
     if lines[i][-1] != '&':
         return lines[i]
     else:
-        return ' '.join([lines[i].replace('&', ''), full_line(lines, i+1)])
+        return ' '.join([lines[i].replace('&', ''), full_line(lines, i + 1)])
+
 
 def dtype_and_value(val_string):
     '''Determine data type and appropriate value of value in string form.
@@ -213,8 +223,8 @@ def dtype_and_value(val_string):
     elif "'" in val_string.lower():
         dtype = 'str'
         val = val_string
-    elif (('d' in val_string.lower()) or ('.' in val_string.lower()) or ('e'
-          in val_string.lower())):
+    elif (('d' in val_string.lower()) or ('.' in val_string.lower()) or
+          ('e' in val_string.lower())):
         dtype = 'float'
         val = val_string.lower().replace('d', 'e')
     elif re.match('\A-?\d+\Z', val_string.lower()):
@@ -222,14 +232,12 @@ def dtype_and_value(val_string):
         val = val_string
     else:
         print("Couldn't determine dtype of " +
-              val_string +'. Keeping it as a string ' +
+              val_string + '. Keeping it as a string ' +
               'literal.')
         dtype = 'str'
         val = val_string
     val = dtype_funcs[dtype](val)
     return dtype, val
-
-
 
 
 def get_doc_text(defaults_lines, name):
@@ -238,7 +246,8 @@ def get_doc_text(defaults_lines, name):
         blank_matcher = re.compile('\s*\Z')
         text_matcher = re.compile('\s*!\s*[^#]\w+')
         return ((blank_matcher.match(line) or text_matcher.match(line)) is not
-                                               None)
+                None)
+
     def is_code(line):
         code_matcher = re.compile('\s*\w+')
         return code_matcher.match(line) is not None
@@ -263,8 +272,7 @@ def get_doc_text(defaults_lines, name):
     return "Could not get documentation for item {}.".format(name)
 
 
-
-def generate_language_data(mesa_dir=None, save_file=None):
+def generate_language_data(mesa_dir=None):
     """Make list of InlistItems that characterizes all valid inlist commands.
 
     Parameters
@@ -280,11 +288,6 @@ def generate_language_data(mesa_dir=None, save_file=None):
     # Determine mesa version for use in determining file names
     with open(join(mesa_dir, 'data', 'version_number'), 'r') as f:
         version = int(f.readline())
-
-    # Specify save location if one isn't provided
-    if save_file is None:
-        save_loc = join(mesa_dir, 'data', 'mesascript_lang_{:d}.json'.format(
-                version))
 
     # Just do basic mesa star namelists now,
     # should be able to add support for binary, others easily, though
@@ -302,11 +305,11 @@ def generate_language_data(mesa_dir=None, save_file=None):
     define_files = {
         'star_job': [join(mesa_dir, 'star', 'private',
                           'star_job_controls.inc')],
-        'controls': [join(mesa_dir, 'star', 'private', 'star_controls.inc'),],
+        'controls': [join(mesa_dir, 'star', 'private', 'star_controls.inc')],
         'pgstar': [join(mesa_dir, 'star', 'private', 'pgstar_controls.inc')]
     }
     define_files['controls'].append(join(mesa_dir, 'star', 'private',
-                                    'ctrls_io.{}'.format(f_end(version))))
+                                         'ctrls_io.{}'.format(f_end(version))))
     default_files = {namelist: join(mesa_dir, 'star', 'defaults', namelist +
                                     '.defaults') for namelist in namelists}
 
@@ -361,9 +364,9 @@ def generate_language_data(mesa_dir=None, save_file=None):
                 elif 'character' in this_type:
                     dtype = dtypes['character']
                 elif 'integer' in this_type:
-                    dtype=dtypes['integer']
+                    dtype = dtypes['integer']
                 elif 'real' in this_type:
-                    dtype=dtypes['real']
+                    dtype = dtypes['real']
                 else:
                     dtype = dtypes['character']
                 dft = dfts.get(dtype, '')
@@ -456,14 +459,13 @@ def generate_language_data(mesa_dir=None, save_file=None):
                     namelist_data[j].doc = doc
                 except ValueError as e:
                     namelist_data.append(NamelistItem(assign_name,
-                                                                dtype, val,
-                                                                num_indices,
-                                                                order,
-                                                                namelist, doc))
+                                                      dtype, val, num_indices,
+                                                      order, namelist, doc))
                 order += 1
         # namelist_dicts = [item.to_dict() for item in namelist_data]
         namelist_tuples = [item.to_tuple() for item in namelist_data]
     return namelist_tuples
+
 
 def make_database(save_file=join(get_mesa_dir(), 'data', 'mesa.db')):
     '''Make database of inlist commands.
@@ -485,16 +487,18 @@ def make_database(save_file=join(get_mesa_dir(), 'data', 'mesa.db')):
     conn = sqlite3.connect(save_file)
     c = conn.cursor()
     c.execute("CREATE TABLE inlist_items\n" + "(name text, lower_name text, "
-              "dtype text, dft text, dim integer, ord integer, namelist text," +
-              "doc text)")
+              "dtype text, dft text, dim integer, ord integer, namelist " +
+              "text, doc text)")
     conn.commit()
 
     # Add data
     c.executemany('INSERT INTO inlist_items VALUES (?,?,?,?,?,?,?,?)', data)
     conn.commit()
 
+
 def have_database():
     return 'mesa.db' in os.listdir(join(get_mesa_dir(), 'data'))
+
 
 class MesaDatabase(object):
     '''Interface for reading and searching a MESA database.
@@ -513,6 +517,7 @@ class MesaDatabase(object):
         database cursor for reading from database
 
     '''
+
     def __init__(self, db_file=None):
         if db_file is None:
             db_file = join(get_mesa_dir(), 'data', 'mesa.db')
@@ -548,9 +553,10 @@ class MesaDatabase(object):
         None
         '''
         self._ensure_connection()
-        assert query.count('?') == len(terms), ("Search query must have equal "+
-                                                "number of question marks as " +
-                                                "the length of search terms.")
+        assert query.count('?') == len(terms), ("Search query must have " +
+                                                "equal number of question " +
+                                                "marks as the length of " +
+                                                "search terms.")
         self.cursor.execute("SELECT * FROM {} WHERE {}".format(table, query),
                             terms)
 
@@ -594,7 +600,6 @@ class MesaDatabase(object):
         self.search(table, query, terms)
         return self.cursor.fetchall()
 
-
     def _ensure_connection(self):
         '''Connects to database if not already done.'''
         if self.cursor is None:
@@ -608,7 +613,6 @@ class MesaDatabase(object):
         else:
             raise InvalidDatabaseError('No such database found: {}'.format(
                 self.db_file))
-
 
     def _does_db_file_exist(self):
         '''Determines if database file exists or not.'''
@@ -625,6 +629,7 @@ class MesaDatabase(object):
     @cursor.setter
     def cursor(self, value):
         self._cursor = value
+
 
 class InlistDbHandler(object):
     """Interface to get data from inlist commands section of a mesa database.
@@ -672,8 +677,8 @@ class InlistDbHandler(object):
         name : str
             name or part of name to be searched for
         namelist : str, optional
-            name of a namelist to restrict search to (ex. star_job, controls, or
-            pgstar. Defaults to None, which means search all namelists
+            name of a namelist to restrict search to (ex. star_job, controls,
+            or pgstar. Defaults to None, which means search all namelists
 
         Returns
         -------
@@ -699,8 +704,8 @@ class InlistDbHandler(object):
         term : str
             term for which to look in documentation for
         namelist : str, optional
-            name of a namelist to restrict search to (ex. star_job, controls, or
-            pgstar. Defaults to None, which means search all namelists
+            name of a namelist to restrict search to (ex. star_job, controls,
+            or pgstar. Defaults to None, which means search all namelists
 
         Returns
         -------
