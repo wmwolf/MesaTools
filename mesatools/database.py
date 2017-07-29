@@ -5,7 +5,7 @@ import shutil
 import sqlite3
 
 from .helpers import get_mesa_dir
-from .fortran import f_end, full_line, is_comment, is_blank
+from .fortran import f_end, full_lines
 
 
 # Each item has an associated converter function that will take inputs
@@ -273,33 +273,28 @@ def generate_language_data(mesa_dir=None):
                 print("Couldn't open file {}.".format(define_file))
                 continue
 
-            # Clean out lines that are entirely comments or blank
-            cleaned_lines = []
-            for line in lines:
-                if not(is_comment(line) or is_blank(line)):
-                    # Also remove inline comments
-                    if '!' in line:
-                        line = line[0:line.index('!')]
-                    cleaned_lines.append(line.strip())
+            # Get full lines with no comments (inline or otherwise) or blank
+            # lines
+            code_lines = full_lines(lines, include_blanks=False,
+                                    include_comments=False)
+            code_lines = [line[0:line.index('!')].strip() if '!' in line else
+                          line.strip() for line in code_lines]
 
-            # Now remove line-continuations, so each declaration is one
-            # string without newlines, stopping for any defined subroutines
-            # and functions.
-            full_lines = []
-            for i, line in enumerate(cleaned_lines):
+            assignment_lines = []
+            for i, line in enumerate(code_lines):
                 if re.match('\A\s*contains', line):
                     break
                 if '::' not in line:
                     continue
                 else:
-                    full_lines.append(full_line(cleaned_lines, i))
+                    assignment_lines.append(line)
 
             # Break each full line into pairs of declaration information (
             # type, dimension, etc.) and names (one or more separated by
             # commas), ascertaining the type, dimension, and default value of
             # each variable.
             pairs = [[s.strip() for s in line.split('::')] for line in
-                     full_lines]
+                     assignment_lines]
             for this_type, names in pairs:
                 if 'logical' in this_type:
                     dtype = dtypes['logical']
@@ -362,8 +357,6 @@ def generate_language_data(mesa_dir=None):
         # Get all names for items in this namelist
         names = [item.name for item in namelist_data]
         lower_names = [name.lower() for name in names]
-
-        # print(lower_names)
 
         # Go through each line of the defaults file, looking for lines that
         # define the default for a control. Then name, order, dtype and
